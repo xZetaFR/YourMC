@@ -80,4 +80,132 @@ Authentification JWT (expiration 7 jours), mots de passe hashés en bcrypt, requ
 
 ---
 
+## Architecture technique
+
+<details>
+<summary><strong>Détails pour les développeurs</strong> (API, schéma de données, patterns)</summary>
+
+### Plateforme YourMC — backend
+
+```
+src/
+├── controllers/     auth, product, order, user
+├── routes/           endpoints REST (Express Router)
+├── middlewares/       auth.middleware (vérif JWT), admin.middleware, errorHandler
+├── services/          appels aux services externes
+├── utils/             jwt.utils, validation.utils (Zod), crypto.utils (bcrypt)
+├── prisma/             schema.prisma + seed
+└── server.ts           point d'entrée Express
+```
+
+`Node.js 20` · `Express 4` · `TypeScript 5` · `Prisma 5` · `jsonwebtoken` · `bcrypt` · `Zod` · `Helmet` · `cors`
+
+### Plateforme YourMC — frontend
+
+```
+src/
+├── components/ui/     Button, Input, Card, Modal, Loading (design system interne)
+├── pages/               Home, Products, Login, Register, Dashboard
+├── services/api.ts      client Axios + intercepteur JWT
+├── store/                Zustand (authStore, productStore)
+└── App.tsx               routing (React Router)
+```
+
+`React 19` · `TypeScript` · `Vite` · `Tailwind CSS 4` · `React Router 7` · `Zustand` · `Framer Motion` · `React Hook Form` + `Zod`
+
+### Modèle de données (Prisma / MySQL, simplifié)
+
+```prisma
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  username  String   @unique
+  password  String   // bcrypt
+  role      Role     @default(USER)
+  licenses  License[]
+  orders    Order[]
+}
+
+model Product {
+  id          Int    @id @default(autoincrement())
+  name        String
+  price       Decimal
+  category    String
+  orderItems  OrderItem[]
+}
+
+model Order {
+  id     Int         @id @default(autoincrement())
+  userId Int
+  items  OrderItem[]
+  total  Decimal
+  status String      // pending | completed | failed
+}
+
+model License {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  productId Int
+  key       String    @unique
+  status    String    // active | revoked | expired
+  expiresAt DateTime?
+}
+```
+
+### Flux d'authentification
+
+```
+POST /api/auth/register  { email, username, password }
+  → validation Zod (8+ car., majuscule, minuscule, chiffre)
+  → bcrypt.hash(password, 10)
+
+POST /api/auth/login  { email, password }
+  → bcrypt.compare
+  → jwt.sign({ userId, role }, SECRET, { expiresIn: "7d" })
+
+Client → localStorage.setItem("token", jwt)
+Axios  → intercepteur ajoute `Authorization: Bearer <token>` à chaque requête
+API    → middleware auth.middleware vérifie le JWT sur les routes protégées
+```
+
+### Endpoints principaux (API REST)
+
+| Méthode | Route | Description | Auth |
+|---|---|---|---|
+| `POST` | `/api/auth/register` | Création de compte | — |
+| `POST` | `/api/auth/login` | Connexion, retourne un JWT | — |
+| `GET` | `/api/auth/me` | Profil de l'utilisateur courant | JWT |
+| `GET` | `/api/products` | Catalogue produits | — |
+| `POST` | `/api/products` | Création produit | JWT + admin |
+| `GET` | `/api/orders` | Commandes de l'utilisateur | JWT |
+
+### YourBOT — architecture
+
+```
+src/
+├── commands/      commandes Discord (slash commands)
+├── events/         event handlers (ready, interactionCreate, guildMemberAdd…)
+├── interactions/   boutons, menus, modals
+├── jobs/           tâches planifiées (cron)
+└── modules/        modération, tickets, réaction-rôle
+```
+
+`discord.js v14` · `TypeScript` · `Prisma` (base de données propre au bot) · communication avec la plateforme via API REST + webhooks.
+
+### YourShop Plugin — architecture
+
+Plugin serveur Minecraft (Paper API), écrit en Java et buildé avec Gradle. À l'achat (in-game ou via le site), le serveur interroge l'API YourMC pour valider la licence, puis livre le produit au joueur via des commandes RCON/exécution directe. Deux lignes de version maintenues en parallèle (1.21.x et 26.1) pour couvrir plusieurs versions de serveur.
+
+### YourLauncher — architecture
+
+Application desktop Electron. Authentification via le même JWT que la plateforme web (stocké localement), synchronisation des profils et des mods, téléchargement et vérification des fichiers client avant lancement du jeu.
+
+### Déploiement
+
+VPS Debian, Nginx en reverse proxy devant l'API et le frontend buildé, process Node.js gérés par PM2 (API, bots Discord), MySQL en base partagée, HTTPS via certificats TLS sur tous les sous-domaines.
+
+</details>
+
+---
+
 <sub>Documentation de portfolio — le code source de chaque produit reste privé.</sub>
